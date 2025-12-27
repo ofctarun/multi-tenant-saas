@@ -58,7 +58,7 @@ function Users() {
       setFullName("");
       setRole("user");
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to add user");
+      setError(err.response?.data?.message || "Failed to add the user");
     }
   };
 
@@ -66,20 +66,20 @@ function Users() {
      DELETE USER
   ========================= */
   const handleDelete = async (userId) => {
-    if (!window.confirm("Are you sure you want to delete this user?")) return;
+    if (!window.confirm("Are you sure to delete this user?")) return;
 
     try {
       await api.delete(`/users/${userId}`);
       setUsers((prev) => prev.filter((u) => u.id !== userId));
     } catch (err) {
-      alert(err.response?.data?.message || "Delete failed");
+      alert(err.response?.data?.message || "Deletion failed");
     }
   };
 
   return (
     <div className="dashboard-container">
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "13px" }}>
           <UserPlus size={28} className="text-muted" color="var(--text-muted)" />
           <h2 style={{ fontSize: "1.2rem", color: "var(--text-muted)", margin: 0 }}>Team Members</h2>
         </div>
@@ -93,7 +93,7 @@ function Users() {
       {/* ================= ADD USER FORM ================= */}
       {isTenantAdmin() && (
         <div className="inline-form">
-          <h4 style={{ marginBottom: "15px", color: "var(--text-main)" }}>Add New Member</h4>
+          <h4 style={{ marginBottom: "16px", color: "var(--text-main)" }}>Add New Member</h4>
           <form onSubmit={handleAddUser} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={{ flex: 1, minWidth: "200px" }}>
               <label>Full Name</label>
