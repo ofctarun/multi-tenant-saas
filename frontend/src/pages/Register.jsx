@@ -69,7 +69,7 @@ function Register() {
         <div className="form-group">
           <label>Subdomain (Workspace URL)</label>
           <input name="subdomain" placeholder="acme" onChange={handleChange} required />
-          <small style={{ marginTop: "-5px", color: "#6b7280", fontSize: "0.8rem" }}>Your site will be: {form.subdomain || "your-company"}.saas.com</small>
+          <small style={{ marginTop: "-5px", color: "#6b7280", fontSize: "0.9rem" }}>Your site will be : {form.subdomain || "your-company"}.saas.com</small>
         </div>
 
         <div className="form-group">
@@ -79,12 +79,12 @@ function Register() {
 
         <div className="form-group">
           <label>Admin Email</label>
-          <input name="adminEmail" type="email" placeholder="john@acme.com" onChange={handleChange} required />
+          <input name="adminEmail" type="email" placeholder="johnn@acme.com" onChange={handleChange} required />
         </div>
 
         <div className="form-group">
           <label>Password</label>
-          <input name="adminPassword" type="password" minLength={8} maxLength={20} placeholder="Create a strong password" onChange={handleChange} required />
+          <input name="adminPassword" type="password" minLength={8} maxLength={20} placeholder="Create a valid strong password" onChange={handleChange} required />
         </div>
 
         <div className="form-group">
@@ -98,7 +98,7 @@ function Register() {
         </div>
 
         <button disabled={loading} className="btn-full">
-          {loading ? "Creating Account..." : "Create Account"}
+          {loading ? "Creating Account....." : "Create Account"}
         </button>
       </form>
 
