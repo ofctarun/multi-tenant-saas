@@ -6,7 +6,7 @@ export const authenticate = (req, res, next) => {
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({
       success: false,
-      message: "Authorization token missing",
+      message: "Authorization Token missing",
     });
   }
 
@@ -25,7 +25,7 @@ export const authenticate = (req, res, next) => {
   } catch (error) {
     return res.status(401).json({
       success: false,
-      message: "Invalid or expired token",
+      message: "Invalid or Expired token",
     });
   }
 };

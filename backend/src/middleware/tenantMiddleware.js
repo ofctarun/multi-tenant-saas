@@ -1,5 +1,5 @@
 const tenantMiddleware = (req, res, next) => {
-  if (req.user.role === "super_admin") {
+  if (req.user.role === "Super_admin") {
     return next();
   }
 
