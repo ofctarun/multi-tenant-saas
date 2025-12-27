@@ -1,74 +1,68 @@
-# Multi-Tenant SaaS Application
+# Multi-Tenant SaaS Platform - Project & Task Management System
 
-A production-ready, multi-tenant SaaS application where multiple organizations (tenants) can independently register, manage their teams, create projects, and track tasks.
+A production-ready, multi-tenant SaaS application where multiple organizations can independently register, manage teams, and track projects with complete data isolation, role-based access control (RBAC), and subscription management.
 
-## Features
+## 🚀 Features
 
-- **Multi-Tenancy**: Complete data isolation with unique subdomains per tenant.
-- **Authentication**: Secure JWT-based auth with Role-Based Access Control (RBAC).
-- **Three Roles**: Super Admin, Tenant Admin, and User.
-- **Subscription Plans**: Free, Pro, and Enterprise tiers with varying limits.
-- **Project Management**: Create projects, assign tasks, and track status.
-- **Dashboard**: Real-time statistics and recent activity.
-- **Responsive UI**: Built with React and optimized for all devices.
-- **Dockerized**: Fully containerized backend, frontend, and database.
+- **Multi-Tenancy Architecture**: Shared database with `tenant_id` column isolation and unique subdomain identification.
+- **Role-Based Access Control (RBAC)**: Secure access for Super Admin (system-level), Tenant Admin (org-level), and User (team member).
+- **Subscription Plan Enforcement**: Automated checks for `max_users` and `max_projects` based on Free, Pro, and Enterprise plans.
+- **Audit Logging**: Mandatory tracking of all critical CREATE, UPDATE, and DELETE actions in the `audit_logs` table.
+- **Kanban Task Management**: Real-time project tracking with tasks grouped by status (Todo, In Progress, Completed).
+- **Responsive Dashboard**: Data-driven overview showing organization-wide statistics and recent activities.
 
-## Tech Stack
+## 🛠️ Tech Stack
 
-- **Backend**: Node.js, Express.js
-- **Frontend**: React, Vite
-- **Database**: PostgreSQL
-- **Containerization**: Docker, Docker Compose
+- **Frontend**: React.js, React Router, Axios (Stateless UI).
+- **Backend**: Node.js, Express.js (RESTful API).
+- **Database**: PostgreSQL 15 (Relational storage with Foreign Key constraints).
+- **Authentication**: JWT (JSON Web Tokens) with 24-hour expiry.
+- **Containerization**: Docker & Docker Compose (Mandatory).
 
-## Prerequisites
+## 🏛️ Architecture Overview
 
-- Docker Desktop installed
-- Node.js (v18+) (optional, for local dev without Docker)
+The system follows a "Shared Database, Shared Schema" approach, utilizing a mandatory `tenant_id` on every table (projects, tasks, users) to ensure strict data isolation.
 
-## Getting Started (Docker)
+## ⚙️ Installation & Setup (MANDATORY)
 
-The easiest way to run the application is using Docker.
+This application is fully containerized. Follow these steps for a one-command deployment:
 
-1.  **Clone the repository**
-2.  **Start the services**
-    ```bash
-    docker-compose up -d --build
-    ```
-    This command will:
-    - Start PostgreSQL database on port 5432.
-    - Start Backend API on port 5000.
-    - Start Frontend on port 3000.
-    - **Automatically run database migrations and seed data.**
+1. **Prerequisites**: Ensure Docker and Docker Compose are installed on your machine.
+2. **Clone the Repo**: `git clone https://github.com/Srikar-jayanthi/saas-platform.git`
+3. **Start Services**: Run the following command in the root directory:
+`docker-compose up -d`
 
-3.  **Access the Application**
-    - Frontend: [http://localhost:3000](http://localhost:3000)
-    - Backend Health Check: [http://localhost:5000/api/health](http://localhost:5000/api/health)
+**Access the App:**
 
-## Default Credentials (Seed Data)
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:5000
+- Health Check: http://localhost:5000/api/health
 
-**Super Admin**
-- Email: `superadmin@system.com`
-- Password: `Admin@123`
+*The database will be automatically initialized with migrations and seed data upon startup.*
 
-**Tenant Admin**
-- Email: `admin@demo.com`
-- Password: `Demo@123`
-- Subdomain: `demo`
+## 🔑 Test Credentials
 
-**Regular User**
-- Email: `user1@demo.com`
-- Password: `User@123`
-- Tenant Subdomain: `demo`
+Detailed credentials for all roles are provided in the submission.json file located in the root directory.
 
-## API Documentation
+| Role          | Email                    | Password  | Tenant/Subdomain |
+|---------------|--------------------------|-----------|------------------|
+| Super Admin   | superadmin@system.com    | Admin@123 | (None)           |
+| Tenant Admin  | admin@demo.com           | Demo@123  | demo             |
+| Standard User | user1@demo.com           | User@123  | demo             |
 
-The backend provides a RESTful API with 19 endpoints.
-Detailed documentation can be found in [docs/API.md](docs/API.md).
+## 📡 API Documentation
 
-## Project Structure
+All 19 endpoints are documented in docs/API.md. Key modules include:
 
-- `backend/` - Node.js API server
-- `frontend/` - React application
-- `database/` - Migrations and Seed data
-- `docs/` - Project documentation
-- `docker-compose.yml` - Docker orchestration config
+- POST /api/auth/register-tenant: Organization onboarding.
+- POST /api/auth/login: Tenant-specific authentication.
+- GET /api/health: System and database status check.
+- GET /api/projects: Isolated project listing.
+- GET /api/tenants: Platform-wide management (Super Admin only).
+
+## 📄 Documentation
+
+- Research Document: docs/research.md (Multi-tenancy analysis).
+- PRD: docs/PRD.md (User personas and requirements).
+- Architecture: docs/architecture.md (ERD and System Design).
+- Technical Spec: docs/technical-spec.md (Setup and structure).

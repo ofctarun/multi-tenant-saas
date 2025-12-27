@@ -1,319 +1,253 @@
-import bcrypt from "bcrypt";
-import pool from "../config/db.js";
-import auditLog from "../utils/auditLogger.js";
+const db = require('../config/db');
 
-/* ===============================
-   ADD USER TO TENANT (API 8)
-================================ */
-export const addUser = async (req, res) => {
-  const { tenantId } = req.params;
-  const { email, fullName, role = "user" } = req.body;
-  const currentUser = req.user;
+const bcrypt = require('bcryptjs');
 
-  try {
-    // 🔐 Authorization
-    if (
-      currentUser.role !== "tenant_admin" ||
-      currentUser.tenantId !== tenantId
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "Unauthorized",
-      });
+
+
+/**
+
+ * API 8: Add User to Tenant
+
+ * Requirements: Plan limits, Audit Logging, and Transaction Safety
+
+ */
+
+exports.addUser = async (req, res) => {
+
+    const { tenantId, userId, role: adminRole } = req.user;
+
+    const adminId = userId;
+
+
+
+    // Handle naming styles from frontend and required fields
+
+    const fullName = req.body.fullName || req.body.full_name;
+
+    const { email, password, role } = req.body;
+
+
+
+    if (!fullName || !email || !password) {
+
+        return res.status(400).json({
+
+            success: false,
+
+            message: 'Full Name, Email, and Password are required.'
+
+        });
+
     }
 
-    // 🔢 Subscription limit
-    const tenantResult = await pool.query(
-      "SELECT max_users FROM tenants WHERE id = $1",
-      [tenantId]
-    );
 
-    const userCountResult = await pool.query(
-      "SELECT COUNT(*) FROM users WHERE tenant_id = $1",
-      [tenantId]
-    );
 
-    if (
-      Number(userCountResult.rows[0].count) >=
-      tenantResult.rows[0].max_users
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "Subscription limit reached",
-      });
+    // Super Admin should not create users without a tenant context in this flow
+
+    if (adminRole === 'super_admin' && !req.body.tenantId) {
+
+        return res.status(400).json({ success: false, message: 'Super Admin must specify a tenantId to add a user.' });
+
     }
 
-    // 🔑 Generate temporary password
-    const tempPassword = "User@123";
-    const passwordHash = await bcrypt.hash(tempPassword, 10);
 
-    // 👤 Create user
-    const result = await pool.query(
-      `INSERT INTO users 
-       (tenant_id, email, password_hash, full_name, role) 
-       VALUES ($1, $2, $3, $4, $5) 
-       RETURNING id, email, full_name, role, is_active, created_at`,
-      [tenantId, email, passwordHash, fullName, role]
-    );
 
-    // 📝 Audit log
-    await auditLog({
-      tenantId,
-      userId: currentUser.userId,
-      action: "CREATE_USER",
-      entityType: "user",
-      entityId: result.rows[0].id,
-      ipAddress: req.ip,
-    });
+    const targetTenantId = adminRole === 'super_admin' ? req.body.tenantId : tenantId;
 
-    return res.status(201).json({
-      success: true,
-      message: "User created successfully",
-      data: result.rows[0],
-    });
-  } catch (error) {
-    console.error("ADD USER ERROR:", error.message);
+    const client = await db.pool.connect();
 
-    if (error.code === "23505") {
-      return res.status(409).json({
-        success: false,
-        message: "Email already exists in this tenant",
-      });
+
+
+    try {
+
+        await client.query('BEGIN');
+
+
+
+        // 1. Get Tenant Plan Limits
+
+        const tenantRes = await client.query(
+
+            'SELECT max_users FROM tenants WHERE id = $1',
+
+            [targetTenantId]
+
+        );
+
+        if (tenantRes.rows.length === 0) {
+
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({ success: false, message: 'Tenant not found' });
+
+        }
+
+       
+
+        const maxUsers = tenantRes.rows[0].max_users;
+
+
+
+        // 2. Count Current Users and Enforce Limits
+
+        const countRes = await client.query(
+
+            'SELECT COUNT(*) FROM users WHERE tenant_id = $1',
+
+            [targetTenantId]
+
+        );
+
+        if (parseInt(countRes.rows[0].count) >= maxUsers) {
+
+            await client.query('ROLLBACK');
+
+            return res.status(403).json({
+
+                success: false,
+
+                message: 'Subscription limit reached for this tenant.'
+
+            });
+
+        }
+
+
+
+        // 3. Create User with Hashed Password
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const newUser = await client.query(
+
+            `INSERT INTO users (tenant_id, email, password_hash, full_name, role, is_active)
+
+             VALUES ($1, $2, $3, $4, $5, $6)
+
+             RETURNING id, email, full_name, role`,
+
+            [targetTenantId, email, hashedPassword, fullName, role || 'user', true]
+
+        );
+
+
+
+        // 4. Mandatory Audit Logging
+
+        await client.query(
+
+            `INSERT INTO audit_logs (tenant_id, user_id, action, entity_type, entity_id, details)
+
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+
+            [targetTenantId, adminId, 'CREATE_USER', 'users', newUser.rows[0].id, JSON.stringify({ email: email })]
+
+        );
+
+
+
+        await client.query('COMMIT');
+
+        res.status(201).json({ success: true, message: 'User created successfully', data: newUser.rows[0] });
+
+
+
+    } catch (error) {
+
+        await client.query('ROLLBACK');
+
+        if (error.code === '23505') {
+
+            return res.status(409).json({ success: false, message: 'Email already exists in this tenant.' });
+
+        }
+
+        res.status(500).json({ success: false, message: "Internal server error" });
+
+    } finally {
+
+        client.release();
+
     }
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create user",
-    });
-  }
 };
 
 
-/* ===============================
-   LIST TENANT USERS (API 9)
-================================ */
-export const listUsers = async (req, res) => {
-  const { tenantId } = req.params;
-  const { search, role, page = 1, limit = 50 } = req.query;
-  const offset = (page - 1) * limit;
 
-  try {
-    if (req.user.role !== "super_admin" && req.user.tenantId !== tenantId) {
-      return res.status(403).json({
-        success: false,
-        message: "Unauthorized",
-      });
+/**
+
+ * API 9: List Tenant Users
+
+ * Logic: Super Admin sees global users, Tenant Admin sees organization users.
+
+ */
+
+exports.listUsers = async (req, res) => {
+
+    const { tenantId, role } = req.user;
+
+
+
+    try {
+
+        let query;
+
+        let params = [];
+
+
+
+        if (role === 'super_admin') {
+
+            // Super Admin: List ALL users across the platform
+
+            query = `
+
+                SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.created_at, t.name as tenant_name
+
+                FROM users u
+
+                LEFT JOIN tenants t ON u.tenant_id = t.id
+
+                ORDER BY u.created_at DESC`;
+
+        } else {
+
+            // Tenant Admin/User: Restricted to their organization
+
+            query = `
+
+                SELECT id, email, full_name, role, is_active, created_at
+
+                FROM users
+
+                WHERE tenant_id = $1
+
+                ORDER BY created_at DESC`;
+
+            params = [tenantId];
+
+        }
+
+
+
+        const result = await db.query(query, params);
+
+
+
+        res.json({
+
+            success: true,
+
+            message: 'Users retrieved successfully',
+
+            data: { users: result.rows }
+
+        });
+
+    } catch (error) {
+
+        res.status(500).json({ success: false, message: error.message });
+
     }
 
-    const conditions = ["tenant_id = $1"];
-    const values = [tenantId];
-    let index = 2;
-
-    if (search) {
-      conditions.push(`(email ILIKE $${index} OR full_name ILIKE $${index})`);
-      values.push(`%${search}%`);
-      index++;
-    }
-
-    if (role) {
-      conditions.push(`role = $${index}`);
-      values.push(role);
-      index++;
-    }
-
-    const usersResult = await pool.query(
-      `SELECT id, email, full_name, role, is_active, created_at
-       FROM users
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY created_at DESC
-       LIMIT $${index} OFFSET $${index + 1}`,
-      [...values, limit, offset]
-    );
-
-    const countResult = await pool.query(
-      `SELECT COUNT(*) FROM users WHERE tenant_id = $1`,
-      [tenantId]
-    );
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        users: usersResult.rows,
-        total: Number(countResult.rows[0].count),
-        pagination: {
-          currentPage: Number(page),
-          totalPages: Math.ceil(countResult.rows[0].count / limit),
-          limit: Number(limit),
-        },
-      },
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch users",
-    });
-  }
-};
-
-/* ===============================
-   UPDATE USER (API 10)
-================================ */
-export const updateUser = async (req, res) => {
-  const { userId } = req.params;
-  const updates = req.body;
-  const currentUser = req.user;
-
-  try {
-    const userResult = await pool.query(
-      "SELECT * FROM users WHERE id = $1",
-      [userId]
-    );
-
-    if (userResult.rowCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const user = userResult.rows[0];
-
-    if (
-      currentUser.role !== "tenant_admin" &&
-      currentUser.userId !== userId
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "Unauthorized",
-      });
-    }
-
-    if (
-      currentUser.role !== "tenant_admin" &&
-      (updates.role !== undefined || updates.isActive !== undefined)
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "Not allowed to update role or status",
-      });
-    }
-
-    const fields = [];
-    const values = [];
-    let index = 1;
-
-    if (updates.fullName) {
-      fields.push(`full_name = $${index++}`);
-      values.push(updates.fullName);
-    }
-    if (currentUser.role === "tenant_admin") {
-      if (updates.role) {
-        fields.push(`role = $${index++}`);
-        values.push(updates.role);
-      }
-      if (updates.isActive !== undefined) {
-        fields.push(`is_active = $${index++}`);
-        values.push(updates.isActive);
-      }
-    }
-
-    if (fields.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No valid fields to update",
-      });
-    }
-
-    values.push(userId);
-
-    const result = await pool.query(
-      `UPDATE users
-       SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $${index}
-       RETURNING id, full_name, role, is_active, updated_at`,
-      values
-    );
-
-    await auditLog({
-      tenantId: user.tenant_id,
-      userId: currentUser.userId,
-      action: "UPDATE_USER",
-      entityType: "user",
-      entityId: userId,
-      ipAddress: req.ip,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "User updated successfully",
-      data: result.rows[0],
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update user",
-    });
-  }
-};
-
-/* ===============================
-   DELETE USER (API 11)
-================================ */
-export const deleteUser = async (req, res) => {
-  const { userId } = req.params;
-  const currentUser = req.user;
-
-  try {
-    if (currentUser.role !== "tenant_admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Forbidden",
-      });
-    }
-
-    if (currentUser.userId === userId) {
-      return res.status(403).json({
-        success: false,
-        message: "Cannot delete yourself",
-      });
-    }
-
-    const userResult = await pool.query(
-      "SELECT tenant_id FROM users WHERE id = $1",
-      [userId]
-    );
-
-    if (userResult.rowCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    await pool.query(
-      "UPDATE tasks SET assigned_to = NULL WHERE assigned_to = $1",
-      [userId]
-    );
-
-    await pool.query("DELETE FROM users WHERE id = $1", [userId]);
-
-    await auditLog({
-      tenantId: userResult.rows[0].tenant_id,
-      userId: currentUser.userId,
-      action: "DELETE_USER",
-      entityType: "user",
-      entityId: userId,
-      ipAddress: req.ip,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "User deleted successfully",
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete user",
-    });
-  }
 };

@@ -1,147 +1,35 @@
--- =========================
--- SEED DATA
--- =========================
+-- 1. Wipe Everything
+TRUNCATE tasks, projects, users, audit_logs, tenants CASCADE;
 
--- 1️⃣ SUPER ADMIN (NO TENANT)
-INSERT INTO users (
-    id,
-    tenant_id,
-    email,
-    password_hash,
-    full_name,
-    role,
-    is_active
-) VALUES (
-    uuid_generate_v4(),
-    NULL,
-    'superadmin@system.com',
-    '$2b$10$79U2uYNPwqHhY35ocJiK0O0/WOWfB4E0mz/58pLlcD1f/hmqlc86y', -- Admin@123
-    'System Super Admin',
-    'super_admin',
-    true
-);
+-- 2. Create the Demo Tenant (Subdomain: demo)
+INSERT INTO tenants (id, name, subdomain, status, subscription_plan, plan_name, max_users, max_projects)
+VALUES ('d0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'Demo Company', 'demo', 'active', 'pro', 'Pro Plan', 25, 15);
 
--- 2️⃣ DEMO TENANT
-INSERT INTO tenants (
-    id,
-    name,
-    subdomain,
-    status,
-    subscription_plan,
-    max_users,
-    max_projects
-) VALUES (
-    uuid_generate_v4(),
-    'Demo Company',
-    'demo',
-    'active',
-    'pro',
-    25,
-    15
-);
+-- 3. Super Admin (tenant_id is NULL)
+INSERT INTO users (id, tenant_id, email, password_hash, full_name, role, is_active)
+VALUES (gen_random_uuid(), NULL, 'superadmin@system.com', '$2b$10$C93knitd0FoIxQZSRNR6A.o9mHQp8ESE2F1I5zqBD5pTnzYWmXbmi', 'System Admin', 'super_admin', true);
 
--- 3️⃣ TENANT ADMIN
-INSERT INTO users (
-    id,
-    tenant_id,
-    email,
-    password_hash,
-    full_name,
-    role,
-    is_active
-) VALUES (
-    uuid_generate_v4(),
-    (SELECT id FROM tenants WHERE subdomain = 'demo'),
-    'admin@demo.com',
-    '$2b$10$GbR52VrRXMBuu.Qiq5d.MuSj6Fhx0j54fEbXAUxLoCmBlhVLIoMHy', -- Demo@123
-    'Demo Tenant Admin',
-    'tenant_admin',
-    true
-);
+-- 4. Tenant Admin for Demo Company
+INSERT INTO users (id, tenant_id, email, password_hash, full_name, role, is_active)
+VALUES ('a1e4c6b0-7164-4f23-9c71-3a059c3d4e0b', 'd0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'admin@demo.com', '$2b$10$8psE.wjabp/5cQJ.QmiYEOKvS1BdO4xPc.FJXiAHdETjF0Emp.Jzm', 'Demo Admin', 'tenant_admin', true);
 
--- 4️⃣ REGULAR USERS
-INSERT INTO users (
-    id,
-    tenant_id,
-    email,
-    password_hash,
-    full_name,
-    role,
-    is_active
-) VALUES
-(
-    uuid_generate_v4(),
-    (SELECT id FROM tenants WHERE subdomain = 'demo'),
-    'user1@demo.com',
-    '$2b$10$hPTv4eJyPvQ3y9sjjDZaoe1TyHHit87L2jVTjg0NfgZG8055Rmxd.', -- User@123
-    'Demo User One',
-    'user',
-    true
-),
-(
-    uuid_generate_v4(),
-    (SELECT id FROM tenants WHERE subdomain = 'demo'),
-    'user2@demo.com',
-    '$2b$10$hPTv4eJyPvQ3y9sjjDZaoe1TyHHit87L2jVTjg0NfgZG8055Rmxd.', -- User@123
-    'Demo User Two',
-    'user',
-    true
-);
+-- 5. Two Regular Users for Demo Company
+INSERT INTO users (id, tenant_id, email, password_hash, full_name, role, is_active)
+VALUES 
+(gen_random_uuid(), 'd0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'user1@demo.com', '$2b$10$N/XusZEXew.5t5vuLorMNeht7g5MRL2G08jO5EirSXDAOdCPgx90O', 'User One', 'user', true),
+(gen_random_uuid(), 'd0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'user2@demo.com', '$2b$10$N/XusZEXew.5t5vuLorMNeht7g5MRL2G08jO5EirSXDAOdCPgx90O', 'User Two', 'user', true);
 
--- 5️⃣ PROJECTS
-INSERT INTO projects (
-    id,
-    tenant_id,
-    name,
-    description,
-    status,
-    created_by
-) VALUES
-(
-    uuid_generate_v4(),
-    (SELECT id FROM tenants WHERE subdomain = 'demo'),
-    'Project Alpha',
-    'First demo project',
-    'active',
-    (SELECT id FROM users WHERE email = 'admin@demo.com')
-),
-(
-    uuid_generate_v4(),
-    (SELECT id FROM tenants WHERE subdomain = 'demo'),
-    'Project Beta',
-    'Second demo project',
-    'active',
-    (SELECT id FROM users WHERE email = 'admin@demo.com')
-);
+-- 6. Two Sample Projects
+INSERT INTO projects (id, tenant_id, name, description, status, created_by)
+VALUES 
+('b2e4c6b0-7164-4f23-9c71-3a059c3d4e0c', 'd0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'Project Alpha', 'Main demo project', 'active', 'a1e4c6b0-7164-4f23-9c71-3a059c3d4e0b'),
+('c3e4c6b0-7164-4f23-9c71-3a059c3d4e0d', 'd0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'Project Beta', 'Secondary research project', 'active', 'a1e4c6b0-7164-4f23-9c71-3a059c3d4e0b');
 
--- 6️⃣ TASKS
-INSERT INTO tasks (
-    id,
-    project_id,
-    tenant_id,
-    title,
-    description,
-    status,
-    priority,
-    assigned_to
-) VALUES
-(
-    uuid_generate_v4(),
-    (SELECT id FROM projects WHERE name = 'Project Alpha'),
-    (SELECT id FROM tenants WHERE subdomain = 'demo'),
-    'Setup project structure',
-    'Initial setup task',
-    'todo',
-    'high',
-    (SELECT id FROM users WHERE email = 'user1@demo.com')
-),
-(
-    uuid_generate_v4(),
-    (SELECT id FROM projects WHERE name = 'Project Beta'),
-    (SELECT id FROM tenants WHERE subdomain = 'demo'),
-    'Design database schema',
-    'Create ERD and tables',
-    'in_progress',
-    'medium',
-    (SELECT id FROM users WHERE email = 'user2@demo.com')
-);
+-- 7. Five Sample Tasks
+INSERT INTO tasks (tenant_id, project_id, title, status, priority)
+VALUES 
+('d0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'b2e4c6b0-7164-4f23-9c71-3a059c3d4e0c', 'Initial Research', 'completed', 'high'),
+('d0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'b2e4c6b0-7164-4f23-9c71-3a059c3d4e0c', 'Define Requirements', 'in_progress', 'medium'),
+('d0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'b2e4c6b0-7164-4f23-9c71-3a059c3d4e0c', 'Design UI Mockups', 'todo', 'low'),
+('d0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'c3e4c6b0-7164-4f23-9c71-3a059c3d4e0d', 'Setup Environment', 'completed', 'high'),
+('d0e4c6b0-7164-4f23-9c71-3a059c3d4e0a', 'c3e4c6b0-7164-4f23-9c71-3a059c3d4e0d', 'Beta API Testing', 'todo', 'medium');

@@ -1,365 +1,200 @@
-import pool from "../config/db.js";
-import auditLog from "../utils/auditLogger.js";
+const db = require('../config/db');
 
-/* ===============================
-   CREATE TASK (API 16)
-================================ */
-export const createTask = async (req, res) => {
-  const { projectId } = req.params;
-  const { title, description, assignedTo, priority = "medium", dueDate } = req.body;
-  const { userId, tenantId } = req.user;
+/**
+ * 1. Create a New Task (API 16)
+ */
+exports.createTask = async (req, res) => {
+    const { projectId } = req.params;
+    const { title, description, assignedTo, priority, dueDate } = req.body;
+    const { tenantId, userId, role } = req.user; 
 
-  try {
-    const projectResult = await pool.query(
-      "SELECT tenant_id FROM projects WHERE id = $1",
-      [projectId]
-    );
+    const client = await db.pool.connect();
 
-    if (projectResult.rowCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Project not found",
-      });
+    try {
+        await client.query('BEGIN');
+
+        let projectCheckQuery = 'SELECT id FROM projects WHERE id = $1';
+        let projectCheckParams = [projectId];
+
+        if (role !== 'super_admin') {
+            projectCheckQuery += ' AND tenant_id = $2';
+            projectCheckParams.push(tenantId);
+        }
+
+        const projectRes = await client.query(projectCheckQuery, projectCheckParams);
+
+        if (projectRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(403).json({ success: false, message: 'Access denied to this project' });
+        }
+
+        const result = await client.query(
+            `INSERT INTO tasks (project_id, tenant_id, title, description, assigned_to, priority, due_date, status, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+            [projectId, tenantId, title, description, assignedTo, priority || 'medium', dueDate, 'todo', userId]
+        );
+
+        const newTask = result.rows[0];
+
+        await client.query(
+            `INSERT INTO audit_logs (tenant_id, user_id, action, entity_type, entity_id, details) 
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [tenantId, userId, 'CREATE_TASK', 'tasks', newTask.id, JSON.stringify({ title: newTask.title })]
+        );
+
+        await client.query('COMMIT');
+        res.status(201).json({ success: true, message: 'Task created successfully', data: newTask });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
     }
-
-    const projectTenantId = projectResult.rows[0].tenant_id;
-
-    if (projectTenantId !== tenantId) {
-      return res.status(403).json({
-        success: false,
-        message: "Project does not belong to your tenant",
-      });
-    }
-
-    if (assignedTo) {
-      const userCheck = await pool.query(
-        "SELECT id FROM users WHERE id = $1 AND tenant_id = $2",
-        [assignedTo, tenantId]
-      );
-
-      if (userCheck.rowCount === 0) {
-        return res.status(400).json({
-          success: false,
-          message: "assigned user does not belong to tenant",
-        });
-      }
-    }
-
-    const result = await pool.query(
-      `INSERT INTO tasks
-       (project_id, tenant_id, title, description, priority, assigned_to, due_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [projectId, projectTenantId, title, description, priority, assignedTo, dueDate]
-    );
-
-    await auditLog({
-      tenantId: projectTenantId,
-      userId,
-      action: "CREATE_TASK",
-      entityType: "task",
-      entityId: result.rows[0].id,
-      ipAddress: req.ip,
-    });
-
-    return res.status(201).json({
-      success: true,
-      data: result.rows[0],
-    });
-  } catch (error) {
-    console.error("Create Task Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create the task",
-    });
-  }
 };
 
-/* ===============================
-   LIST PROJECT TASKS (API 17)
-================================ */
-export const listProjectTasks = async (req, res) => {
-  const { projectId } = req.params;
-  const { status, assignedTo, priority, search, page = 1, limit = 50 } = req.query;
-  const offset = (page - 1) * limit;
-  const { tenantId } = req.user;
+/**
+ * 2. List Project Tasks (API 17)
+ */
+exports.getProjectTasks = async (req, res) => {
+    const { projectId } = req.params;
+    const { tenantId, role } = req.user;
 
-  try {
-    const projectResult = await pool.query(
-      "SELECT tenant_id FROM projects WHERE id = $1",
-      [projectId]
-    );
+    try {
+        let query;
+        let params;
 
-    if (
-      projectResult.rowCount === 0 ||
-      projectResult.rows[0].tenant_id !== tenantId
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "Unauthorized",
-      });
+        if (role === 'super_admin') {
+            query = `
+                SELECT t.*, u.full_name as assignee_name
+                FROM tasks t
+                LEFT JOIN users u ON t.assigned_to = u.id
+                WHERE t.project_id = $1
+                ORDER BY t.created_at DESC`;
+            params = [projectId];
+        } else {
+            query = `
+                SELECT t.*, u.full_name as assignee_name
+                FROM tasks t
+                LEFT JOIN users u ON t.assigned_to = u.id
+                WHERE t.project_id = $1 AND t.tenant_id = $2 
+                ORDER BY t.created_at DESC`;
+            params = [projectId, tenantId];
+        }
+
+        const result = await db.query(query, params);
+        res.json({ success: true, data: { tasks: result.rows } });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
-
-    const conditions = ["t.project_id = $1"];
-    const values = [projectId];
-    let index = 2;
-
-    if (status) {
-      conditions.push(`t.status = $${index}`);
-      values.push(status);
-      index++;
-    }
-    if (assignedTo) {
-      conditions.push(`t.assigned_to = $${index}`);
-      values.push(assignedTo);
-      index++;
-    }
-    if (priority) {
-      conditions.push(`t.priority = $${index}`);
-      values.push(priority);
-      index++;
-    }
-    if (search) {
-      conditions.push(`t.title ILIKE $${index}`);
-      values.push(`%${search}%`);
-      index++;
-    }
-
-    const result = await pool.query(
-      `SELECT t.*, u.full_name AS assigned_name, u.email AS assigned_email
-       FROM tasks t
-       LEFT JOIN users u ON t.assigned_to = u.id
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY t.priority DESC, t.due_date ASC
-       LIMIT $${index} OFFSET $${index + 1}`,
-      [...values, limit, offset]
-    );
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        tasks: result.rows,
-        pagination: {
-          currentPage: Number(page),
-          limit: Number(limit),
-        },
-      },
-    });
-  } catch (error) {
-    console.error("List Tasks Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch tasks",
-    });
-  }
 };
 
-/* ===============================
-   UPDATE TASK STATUS (API 18)
-================================ */
-export const updateTaskStatus = async (req, res) => {
-  const { taskId } = req.params;
-  const { status } = req.body;
-  const { tenantId, userId } = req.user;
+/**
+ * 3. Quick Kanban status update (Used for drag-and-drop or simple status toggles)
+ */
+exports.updateTaskStatus = async (req, res) => {
+    const { taskId } = req.params;
+    const { status } = req.body;
+    const { tenantId, role } = req.user;
 
-  try {
-    const taskResult = await pool.query(
-      "SELECT tenant_id FROM tasks WHERE id = $1",
-      [taskId]
-    );
+    try {
+        let query = 'UPDATE tasks SET status = $1, updated_at = NOW() WHERE id = $2';
+        let params = [status, taskId];
 
-    if (
-      taskResult.rowCount === 0 ||
-      taskResult.rows[0].tenant_id !== tenantId
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "Unauthorized",
-      });
+        if (role !== 'super_admin') {
+            query += ' AND tenant_id = $3';
+            params.push(tenantId);
+        }
+
+        const result = await db.query(query + ' RETURNING *', params);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Task not found or access denied' });
+        }
+
+        res.json({ success: true, message: 'Status updated', data: result.rows[0] });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
-
-    const result = await pool.query(
-      `UPDATE tasks
-       SET status = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
-       RETURNING id, status, updated_at`,
-      [status, taskId]
-    );
-
-    await auditLog({
-      tenantId,
-      userId,
-      action: "UPDATE_TASK_STATUS",
-      entityType: "task",
-      entityId: taskId,
-      ipAddress: req.ip,
-    });
-
-    return res.status(200).json({
-      success: true,
-      data: result.rows[0],
-    });
-  } catch (error) {
-    console.error("Update Status Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update task status",
-      error: error.message // Sending error to client for faster debugging (dev only)
-    });
-  }
 };
 
-/* ===============================
-   UPDATE TASK (API 19)
-================================ */
-export const updateTask = async (req, res) => {
-  const { taskId } = req.params;
-  const updates = req.body;
-  const { tenantId, userId } = req.user;
+/**
+ * 4. Full Task Update (API 18)
+ * UPDATED: Explicitly handles title and description updates for Tenant Admins.
+ */
+exports.updateTask = async (req, res) => {
+    const { taskId } = req.params;
+    const { status, title, description, assigned_to, priority, due_date } = req.body;
+    const { tenantId, role, userId } = req.user;
 
-  try {
-    const taskResult = await pool.query(
-      "SELECT * FROM tasks WHERE id = $1",
-      [taskId]
-    );
+    try {
+        let query = `UPDATE tasks 
+                     SET status = COALESCE($1, status), 
+                         title = COALESCE($2, title),
+                         description = COALESCE($3, description),
+                         assigned_to = COALESCE($4, assigned_to),
+                         priority = COALESCE($5, priority),
+                         due_date = COALESCE($6, due_date),
+                         updated_at = NOW() 
+                     WHERE id = $7`;
+        let params = [status, title, description, assigned_to, priority, due_date, taskId];
 
-    if (
-      taskResult.rowCount === 0 ||
-      taskResult.rows[0].tenant_id !== tenantId
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "Unauthorized",
-      });
+        // Ensure user can only update tasks within their own tenant
+        if (role !== 'super_admin') {
+            query += ' AND tenant_id = $8';
+            params.push(tenantId);
+        }
+
+        const result = await db.query(query + ' RETURNING *', params);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Task not found or unauthorized' });
+        }
+
+        // Audit the update action
+        await db.query(
+            `INSERT INTO audit_logs (tenant_id, user_id, action, entity_type, entity_id) 
+             VALUES ($1, $2, $3, $4, $5)`,
+            [tenantId, userId, 'UPDATE_TASK', 'tasks', taskId]
+        );
+
+        res.json({ success: true, message: 'Task updated successfully', data: result.rows[0] });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
-
-    if (updates.assignedTo !== undefined && updates.assignedTo !== null) {
-      const userCheck = await pool.query(
-        "SELECT id FROM users WHERE id = $1 AND tenant_id = $2",
-        [updates.assignedTo, tenantId]
-      );
-
-      if (userCheck.rowCount === 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Assigned user does not belong to tenant",
-        });
-      }
-    }
-
-    const fields = [];
-    const values = [];
-    let index = 1;
-
-    if (updates.title) {
-      fields.push(`title = $${index++}`);
-      values.push(updates.title);
-    }
-    if (updates.description) {
-      fields.push(`description = $${index++}`);
-      values.push(updates.description);
-    }
-    if (updates.status) {
-      fields.push(`status = $${index++}`);
-      values.push(updates.status);
-    }
-    if (updates.priority) {
-      fields.push(`priority = $${index++}`);
-      values.push(updates.priority);
-    }
-    if (updates.assignedTo !== undefined) {
-      fields.push(`assigned_to = $${index++}`);
-      values.push(updates.assignedTo);
-    }
-    if (updates.dueDate !== undefined) {
-      fields.push(`due_date = $${index++}`);
-      values.push(updates.dueDate);
-    }
-
-    if (fields.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No valid fields to update",
-      });
-    }
-
-    values.push(taskId);
-
-    const result = await pool.query(
-      `UPDATE tasks
-       SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $${index}
-       RETURNING *`,
-      values
-    );
-
-    await auditLog({
-      tenantId,
-      userId,
-      action: "UPDATE_TASK",
-      entityType: "task",
-      entityId: taskId,
-      ipAddress: req.ip,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Task updated successfully",
-      data: result.rows[0],
-    });
-  } catch (error) {
-    console.error("Update Task Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update task",
-    });
-  }
 };
 
-/* ===============================
-   DELETE TASK (API 20)
-================================ */
-export const deleteTask = async (req, res) => {
-  const { taskId } = req.params;
-  const { tenantId, userId } = req.user;
-  console.log(`[DELETE TASK] Request received for taskId: ${taskId} by user: ${userId}`);
+/**
+ * 5. Delete Task
+ * Logic: Super Admin global delete; Tenant Admin restricted to organization.
+ */
+exports.deleteTask = async (req, res) => {
+    const { taskId } = req.params;
+    const { tenantId, role, userId } = req.user;
 
-  try {
-    const taskResult = await pool.query(
-      "SELECT tenant_id FROM tasks WHERE id = $1",
-      [taskId]
-    );
+    try {
+        let query = 'DELETE FROM tasks WHERE id = $1';
+        let params = [taskId];
 
-    if (
-      taskResult.rowCount === 0 ||
-      taskResult.rows[0].tenant_id !== tenantId
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "Unauthorized: Task not found or does not belong to your tenant",
-      });
+        if (role !== 'super_admin') {
+            query += ' AND tenant_id = $2';
+            params.push(tenantId);
+        }
+
+        const result = await db.query(query + ' RETURNING id', params);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Task not found or unauthorized' });
+        }
+
+        // Audit the deletion
+        await db.query(
+            `INSERT INTO audit_logs (tenant_id, user_id, action, entity_type, entity_id) 
+             VALUES ($1, $2, $3, $4, $5)`,
+            [tenantId, userId, 'DELETE_TASK', 'tasks', taskId]
+        );
+
+        res.json({ success: true, message: 'Task deleted successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
-
-    await pool.query("DELETE FROM tasks WHERE id = $1", [taskId]);
-
-    await auditLog({
-      tenantId,
-      userId,
-      action: "DELETE_TASK",
-      entityType: "task",
-      entityId: taskId,
-      ipAddress: req.ip,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Task deleted successfully",
-    });
-  } catch (error) {
-    console.error("Delete Task Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete task",
-    });
-  }
 };

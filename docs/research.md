@@ -1,226 +1,38 @@
-## **Multi-Tenant SaaS Platform – Research Document**
+# Multi-Tenancy Research Document
 
-## 1. Multi-Tenancy Analysis
+## 1. Multi-Tenancy Architecture Analysis
 
-Multi-tenancy is an architectural approach where a single software application serves multiple customers (tenants) while ensuring strict data isolation, security, and performance fairness. Each tenant represents an independent organization using the same system but with completely separated data and access boundaries.
+For this SaaS platform, we evaluated three primary architectural patterns for data isolation:
 
-There are three commonly used multi-tenancy models in modern SaaS systems.
+### Approach A: Shared Database + Shared Schema (Column-based Isolation)
+In this model, all tenants share the same database and the same tables. A `tenant_id` column is added to every table to distinguish data.
+- **Pros:** Easiest to maintain, lowest cost, simple migrations, scales well for thousands of small tenants.
+- **Cons:** Risk of "leaky" data if a developer forgets a WHERE clause; "noisy neighbor" effect where one tenant's high usage affects others.
 
----
+### Approach B: Shared Database + Separate Schema
+Each tenant has their own schema (namespace) within one database.
+- **Pros:** Better security than column-based; allows for some tenant-specific customization.
+- **Cons:** Harder to run analytics across all tenants; migration scripts become complex as you must run them for every schema.
 
-### **Approach 1: Shared Database + Shared Schema (tenant_id based)**
+### Approach C: Separate Database
+Every tenant gets a physically separate database instance.
+- **Pros:** Highest isolation and security; no "noisy neighbor" effect.
+- **Cons:** Extremely expensive; massive management overhead for updates and backups.
 
-**Description:**
-All tenants share a single database and the same set of tables. Each table contains a `tenant_id` column, which is used to identify which tenant owns a particular record.
-
-**Example:**
-
-```
-projects
-- id
-- tenant_id
-- name
-- description
-```
-
-**Pros:**
-
-- Cost-effective and easy to scale
-- Simple database management
-- Easy to onboard new tenants
-- Works well with containerized deployments
-- Suitable for small to medium SaaS platforms
-
-**Cons:**
-
-- Requires very careful query filtering
-- A bug in filtering logic may expose data
-- Schema changes affect all tenants
-- Complex queries if tenant isolation is not enforced properly
-
----
-
-### **Approach 2: Shared Database + Separate Schema (schema per tenant)**
-
-**Description:**
-All tenants share the same database server, but each tenant has its own schema. Tables are duplicated per tenant under different schemas.
-
-**Pros:**
-
-- Better isolation than shared schema
-- Easier to backup or restore a single tenant
-- Reduced risk of accidental data leaks
-
-**Cons:**
-
-- Schema management becomes complex
-- Difficult to scale with many tenants
-- Database migrations must be applied to all schemas
-- Higher operational complexity
-
----
-
-### **Approach 3: Separate Database per Tenant**
-
-**Description:**
-Each tenant has its own dedicated database.
-
-**Pros:**
-
-- Maximum data isolation
-- Easy compliance with enterprise requirements
-- Independent scaling per tenant
-
-**Cons:**
-
-- Very high infrastructure cost
-- Complex database provisioning
-- Difficult to manage thousands of tenants
-- Not suitable for early-stage SaaS products
-
----
-
-### **Chosen Approach & Justification**
-
-✅ **Chosen Model: Shared Database + Shared Schema with tenant_id**
-
-**Reasons for selection:**
-
-- Matches the project scope and evaluation expectations
-- Easy to containerize using Docker
-- Simple onboarding for new tenants
-- Scales well for hundreds of tenants
-- Industry-standard approach used by platforms like Slack (early), Notion, and GitHub (logical isolation)
-
-**Data Isolation Strategy:**
-
-- Every table (except super_admin users) includes `tenant_id`
-- Tenant ID is extracted only from JWT
-- Client-provided tenant_id is never trusted
-- Super admin users have `tenant_id = NULL`
-
-This approach balances **simplicity, scalability, and cost**, making it ideal for this SaaS project.
-
----
+### Chosen Approach: Shared Database + Shared Schema
+**Justification:** We have chosen **Approach A** (Shared Schema) because it aligns perfectly with the requirement for "Tenant Identification via tenant_id". It is the most cost-effective for a startup SaaS and allows us to use standard PostgreSQL indexes on `tenant_id` to maintain high performance. Security will be enforced via a mandatory Backend Middleware that injects the `tenant_id` into every query.
 
 ## 2. Technology Stack Justification
 
-### **Backend**
-
-**Node.js + Express.js**
-
-- Lightweight and fast
-- Large ecosystem
-- Easy JWT authentication
-- Well-suited for REST APIs
-- Simple integration with PostgreSQL
-
-**Alternatives considered:**
-
-- Django (Python): heavier for simple REST APIs
-- Spring Boot (Java): too complex for project scope
-
----
-
-### **Frontend**
-
-**React.js**
-
-- Component-based architecture
-- Excellent for dashboards
-- Strong ecosystem
-- Easy role-based UI rendering
-- Works well with REST APIs
-
-**Alternatives considered:**
-
-- Angular (steeper learning curve)
-- Vue (smaller ecosystem)
-
----
-
-### **Database**
-
-**PostgreSQL**
-
-- Strong relational integrity
-- Excellent indexing support
-- ACID compliant
-- Widely used in SaaS platforms
-
-**Alternatives considered:**
-
-- MySQL (less strict constraints)
-- MongoDB (not ideal for relational multi-tenant data)
-
----
-
-### **Authentication**
-
-**JWT (JSON Web Tokens)**
-
-- Stateless
-- Scales well
-- Works perfectly with microservices
-- No session storage required
-
-**Alternatives considered:**
-
-- Session-based auth (harder to scale)
-
----
-
-### **Containerization**
-
-**Docker + Docker Compose**
-
-- Consistent environments
-- One-command deployment
-- Easy evaluation
-- Industry-standard DevOps practice
-
----
+- **Backend: Node.js with Express.js**: Chosen for its non-blocking I/O and vast ecosystem. Express allows us to build the 19 required REST endpoints quickly with clear middleware for RBAC.
+- **Frontend: React.js**: The industry standard for SPAs. Its component-based architecture makes building the Dashboard and Project views efficient.
+- **Database: PostgreSQL**: A robust relational database required for complex foreign key constraints (CASCADE deletes) and the JSONB support we might need for audit logs.
+- **Auth: JWT (JSON Web Tokens)**: Perfect for stateless multi-tenancy. We can encode the `tenant_id` and `role` directly into the token payload.
+- **Containerization: Docker**: Mandatory for this project to ensure the "one-command" setup (`docker-compose up`) works regardless of the host machine.
 
 ## 3. Security Considerations
-
-Security is critical in multi-tenant systems because a single vulnerability can affect multiple organizations.
-
-### **1. Data Isolation**
-
-- All queries are filtered using `tenant_id`
-- Tenant ID is extracted from JWT, not request body
-- Super admin bypasses tenant filter safely
-
----
-
-### **2. Authentication & Authorization**
-
-- JWT tokens signed with secret key
-- Token expiry: 24 hours
-- Role-based access control (RBAC)
-- Middleware enforces role permissions
-
----
-
-### **3. Password Security**
-
-- Passwords are hashed using bcrypt
-- Plain text passwords are never stored
-- Secure comparison during login
-
----
-
-### **4. API Security**
-
-- Input validation on all endpoints
-- Proper HTTP status codes
-- No sensitive data in responses
-- CORS configured strictly
-
----
-
-### **5. Audit Logging**
-
-- All CREATE, UPDATE, DELETE actions logged
-- Helps detect suspicious activity
-- Supports compliance and debugging
+1. **Data Isolation:** Every SQL query will be appended with `WHERE tenant_id = current_user_tenant_id`.
+2. **RBAC:** We will implement a `checkRole` middleware to restrict Super Admin and Tenant Admin routes.
+3. **Password Hashing:** Using `bcrypt` with 12 salt rounds to prevent rainbow table attacks.
+4. **JWT Expiry:** Tokens expire in 24 hours to minimize the window of opportunity for stolen tokens.
+5. **CORS:** Restricting API access only to the frontend service container.

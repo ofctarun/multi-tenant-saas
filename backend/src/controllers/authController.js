@@ -1,222 +1,98 @@
-import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
-import pool from "../config/db.js";
+const db = require('../config/db');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
-/* ===============================
-   REGISTER TENANT
-================================ */
-export const registerTenant = async (req, res) => {
-  const {
-    tenantName,
-    subdomain,
-    adminEmail,
-    adminPassword,
-    adminFullName,
-  } = req.body;
+// Add these console logs at the top of your login or register function just once to see the hashes
 
-  // ✅ BASIC VALIDATION
-  if (
-    !tenantName ||
-    !subdomain ||
-    !adminEmail ||
-    !adminPassword ||
-    !adminFullName
-  ) {
-    return res.status(400).json({
-      success: false,
-      message: "Make sure that All fields are required",
-    });
-  }
 
-  const client = await pool.connect();
+exports.registerTenant = async (req, res) => {
+    const { tenantName, subdomain, adminEmail, adminPassword, adminFullName } = req.body;
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        // 1. Create Tenant
+        const tenantRes = await client.query(
+            'INSERT INTO tenants (name, subdomain, subscription_plan, status) VALUES ($1, $2, $3, $4) RETURNING id',
+            [tenantName, subdomain, 'pro', 'active']
+        );
+        const tenantId = tenantRes.rows[0].id;
+        
+        // 2. Create Admin User
+        const hashedPassword = await bcrypt.hash(adminPassword, 10);
+        const userRes = await client.query(
+            'INSERT INTO users (tenant_id, email, password_hash, full_name, role, is_active) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+            [tenantId, adminEmail, hashedPassword, adminFullName, 'tenant_admin', true]
+        );
+        const adminId = userRes.rows[0].id;
 
-  try {
-    await client.query("BEGIN");
+        // 3. LOG AUDIT EVENT: Tenant Registration
+        await client.query(
+            `INSERT INTO audit_logs (tenant_id, user_id, action, entity_type, entity_id, details) 
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [tenantId, adminId, 'TENANT_REGISTERED', 'tenants', tenantId, JSON.stringify({ name: tenantName, subdomain })]
+        );
 
-    // ✅ CREATE TENANT WITH DEFAULT FREE PLAN
-    const tenantResult = await client.query(
-      `INSERT INTO tenants 
-       (name, subdomain, status, subscription_plan, max_users, max_projects)
-       VALUES ($1, $2, 'active', 'free', 5, 3)
-       RETURNING id, subdomain`,
-      [tenantName, subdomain]
-    );
-
-    const tenantId = tenantResult.rows[0].id;
-
-    // ✅ HASH PASSWORD
-    const passwordHash = await bcrypt.hash(adminPassword, 10);
-
-    // ✅ CREATE TENANT ADMIN USER
-    const userResult = await client.query(
-      `INSERT INTO users 
-       (tenant_id, email, password_hash, full_name, role)
-       VALUES ($1, $2, $3, $4, 'tenant_admin')
-       RETURNING id, email, full_name, role`,
-      [tenantId, adminEmail, passwordHash, adminFullName]
-    );
-
-    await client.query("COMMIT");
-
-    return res.status(201).json({
-      success: true,
-      message: "Tenant Registered successfully",
-      data: {
-        tenantId,
-        subdomain,
-        adminUser: userResult.rows[0],
-      },
-    });
-  } catch (error) {
-    await client.query("ROLLBACK");
-
-    console.error("Error with Tenant registration:", error.message);
-
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
-  } finally {
-    client.release();
-  }
+        await client.query('COMMIT');
+        res.status(201).json({ success: true, message: "Registered successfully" });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        res.status(409).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
 };
 
-/* ===============================
-   LOGIN
-================================ */
-export const login = async (req, res) => {
-  const { email, password, tenantSubdomain } = req.body;
+exports.login = async (req, res) => {
+    const { email, password, tenantSubdomain } = req.body;
 
-  try {
-    const tenantResult = await pool.query(
-      "SELECT id, name, status, subscription_plan FROM tenants WHERE subdomain = $1",
-      [tenantSubdomain]
-    );
+    try {
+        const result = await db.query(
+            `SELECT u.*, t.subdomain as actual_subdomain, t.status as tenant_status 
+             FROM users u 
+             LEFT JOIN tenants t ON u.tenant_id = t.id 
+             WHERE u.email = $1`,
+            [email]
+        );
 
-    if (tenantResult.rowCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Tenant not found",
-      });
+        const user = result.rows[0];
+        if (!user) return res.status(401).json({ success: false, message: 'User not found' });
+        
+        const isMatch = await bcrypt.compare(password, user.password_hash);
+        if (!isMatch) return res.status(401).json({ success: false, message: 'Incorrect password' });
+
+        if (user.role !== 'super_admin') {
+            if (user.actual_subdomain !== tenantSubdomain) {
+                return res.status(401).json({ success: false, message: 'Invalid subdomain' });
+            }
+            if (user.tenant_status !== 'active') {
+                return res.status(403).json({ success: false, message: 'Tenant inactive' });
+            }
+        }
+
+        // Generate Token
+        const token = jwt.sign(
+            { userId: user.id, tenantId: user.tenant_id, role: user.role },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        // LOG AUDIT EVENT: User Login (for non-super admins)
+        if (user.tenant_id) {
+            await db.query(
+                'INSERT INTO audit_logs (tenant_id, user_id, action, entity_type, entity_id) VALUES ($1, $2, $3, $4, $5)',
+                [user.tenant_id, user.id, 'USER_LOGIN', 'users', user.id]
+            );
+        }
+
+        res.json({
+            success: true,
+            data: {
+                user: { id: user.id, email: user.email, role: user.role, tenantId: user.tenant_id, full_name: user.full_name },
+                token
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
-
-    const tenant = tenantResult.rows[0];
-
-    if (tenant.status !== "active") {
-      return res.status(403).json({
-        success: false,
-        message: "Tenant is not active",
-      });
-    }
-
-    const userResult = await pool.query(
-      `SELECT * FROM users
-       WHERE email = $1 AND tenant_id = $2 AND is_active = true`,
-      [email, tenant.id]
-    );
-
-    if (userResult.rowCount === 0) {
-      return res.status(401).json({
-        success: false,
-        message: "Credentials are invalid",
-      });
-    }
-
-    const user = userResult.rows[0];
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-
-    if (!isMatch) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
-      });
-    }
-
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        tenantId: user.tenant_id,
-        role: user.role,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
-    );
-
-    // ✅ IMPORTANT FIX: snake_case fields
-    return res.status(200).json({
-      success: true,
-      data: {
-        user: {
-          id: user.id,
-          email: user.email,
-          full_name: user.full_name,
-          role: user.role,
-          tenant_id: user.tenant_id,
-          // Include tenant details for frontend display
-          tenant_name: tenant.name || tenantResult.rows[0].name, // Ensure we select name in the tenant query above if not already
-          subscription_plan: tenant.subscription_plan || tenantResult.rows[0].subscription_plan,
-        },
-        token,
-      },
-    });
-  } catch (error) {
-    console.error("LOGIN ERROR:", error.message);
-    return res.status(500).json({
-      success: false,
-      message: "Login failed",
-    });
-  }
-};
-
-/* ===============================
-   GET CURRENT USER
-================================ */
-export const getMe = async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT 
-         u.id,
-         u.email,
-         u.full_name,
-         u.role,
-         u.is_active,
-         t.id AS tenant_id,
-         t.name AS tenant_name,
-         t.subdomain,
-         t.subscription_plan,
-         t.max_users,
-         t.max_projects
-       FROM users u
-       LEFT JOIN tenants t ON u.tenant_id = t.id
-       WHERE u.id = $1`,
-      [req.user.userId]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      data: result.rows[0],
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch user",
-    });
-  }
-};
-
-/* ===============================
-   LOGOUT
-================================ */
-export const logout = async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    message: "Logged out successfully",
-  });
 };

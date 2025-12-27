@@ -1,20 +1,23 @@
-# Use official Node image
 FROM node:18-alpine
 
-# Set working directory
+# Install curl for health check mandatory verification
+RUN apk add --no-cache curl
+
 WORKDIR /app
 
-# Copy package files
+# Install dependencies first to leverage Docker layer caching
 COPY package*.json ./
-
-# Install dependencies
 RUN npm install
 
-# Copy source code
+# Copy application source code
 COPY . .
 
-# Expose backend port
+# Expose the backend port matching your .env
 EXPOSE 5000
 
-# Start backend
-CMD ["npm", "run", "start"]
+# Optional: Add explicit Docker health monitoring
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:5000/api/health || exit 1
+
+# Start the server
+CMD ["npm", "start"]

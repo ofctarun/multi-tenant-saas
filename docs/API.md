@@ -1,114 +1,110 @@
 # API Documentation
 
-## Authentication
+This document provides a comprehensive list of the 19 API endpoints implemented in the Multi-Tenant SaaS Platform. All responses follow the format: `{ "success": boolean, "message": string, "data": object }`.
 
-### 1. Tenant Registration
-- **Endpoint**: `POST /api/auth/register-tenant`
-- **Auth**: Public
-- **Body**:
-  ```json
-  {
-    "tenantName": "Company Name",
-    "subdomain": "company",
-    "adminEmail": "admin@company.com",
-    "adminPassword": "password123",
-    "adminFullName": "Admin Name"
-  }
-  ```
+## 1. Authentication Module
 
-### 2. User Login
-- **Endpoint**: `POST /api/auth/login`
-- **Auth**: Public
-- **Body**:
-  ```json
-  {
-    "email": "user@company.com",
-    "password": "password123",
-    "tenantSubdomain": "company"
-  }
-  ```
+Endpoints for tenant registration, user login, and session management.
 
-### 3. Get Current User
-- **Endpoint**: `GET /api/auth/me`
-- **Auth**: Bearer Token
-- **Response**: User and Tenant details.
+- **POST** `/api/auth/register-tenant`
+  - **Auth**: None (Public)
+  - **Description**: Registers a new organization and its primary administrator.
+  - **Request Body**: `tenantName, subdomain, adminEmail, adminPassword, adminFullName`
 
-### 4. Logout
-- **Endpoint**: `POST /api/auth/logout`
-- **Auth**: Bearer Token
+- **POST** `/api/auth/login`
+  - **Auth**: None (Public)
+  - **Description**: Authenticates a user and returns a 24-hour JWT.
+  - **Request Body**: `email, password, tenantSubdomain`
 
----
+- **GET** `/api/auth/me`
+  - **Auth**: Required (JWT)
+  - **Description**: Returns the current authenticated user's profile and tenant info.
 
-## Tenant Management
+- **POST** `/api/auth/logout`
+  - **Auth**: Required (JWT)
+  - **Description**: Informs the system to end the session (handled client-side by token removal).
 
-### 5. Get Tenant Details
-- **Endpoint**: `GET /api/tenants/:tenantId`
-- **Auth**: Tenant Member or Super Admin
+## 2. Tenant Management Module
 
-### 6. Update Tenant
-- **Endpoint**: `PUT /api/tenants/:tenantId`
-- **Auth**: Tenant Admin (Name only) or Super Admin (All fields)
+Endpoints for system-level and organization-level administration.
 
-### 7. List All Tenants
-- **Endpoint**: `GET /api/tenants`
-- **Auth**: Super Admin Only
+- **GET** `/api/tenants`
+  - **Auth**: Required (Super Admin Only)
+  - **Description**: Lists all tenants in the system with their usage stats.
 
----
+- **GET** `/api/tenants/:tenantId`
+  - **Auth**: Required (Tenant Admin or Super Admin)
+  - **Description**: Retrieves details for a specific organization, including subscription limits.
 
-## User Management
+- **PUT** `/api/tenants/:tenantId`
+  - **Auth**: Required (Tenant Admin or Super Admin)
+  - **Description**: Updates organization name (Tenant Admin) or status/plan (Super Admin).
 
-### 8. Add User to Tenant
-- **Endpoint**: `POST /api/tenants/:tenantId/users`
-- **Auth**: Tenant Admin
+## 3. User Management Module
 
-### 9. List Tenant Users
-- **Endpoint**: `GET /api/tenants/:tenantId/users`
-- **Auth**: Tenant Member
+Endpoints for managing team members within an organization.
 
-### 10. Update User
-- **Endpoint**: `PUT /api/users/:userId`
-- **Auth**: Tenant Admin
+- **POST** `/api/tenants/:tenantId/users`
+  - **Auth**: Required (Tenant Admin)
+  - **Description**: Adds a new user. Enforces `max_users` plan limits.
+  - **Request Body**: `email, password, fullName, role`
 
-### 11. Delete User
-- **Endpoint**: `DELETE /api/users/:userId`
-- **Auth**: Tenant Admin
+- **GET** `/api/tenants/:tenantId/users`
+  - **Auth**: Required (Same Tenant)
+  - **Description**: Lists all users belonging to the organization.
 
----
+- **PUT** `/api/users/:userId`
+  - **Auth**: Required (Tenant Admin or Self)
+  - **Description**: Updates user profile details or active status.
 
-## Project Management
+- **DELETE** `/api/users/:userId`
+  - **Auth**: Required (Tenant Admin)
+  - **Description**: Removes a user. Tenant admins cannot delete themselves.
 
-### 12. Create Project
-- **Endpoint**: `POST /api/projects`
-- **Auth**: Tenant Member
+## 4. Project Management Module
 
-### 13. List Projects
-- **Endpoint**: `GET /api/projects`
-- **Auth**: Tenant Member
+Endpoints for handling organization-wide projects.
 
-### 14. Update Project
-- **Endpoint**: `PUT /api/projects/:projectId`
-- **Auth**: Admin or Creator
+- **POST** `/api/projects`
+  - **Auth**: Required (Any Role)
+  - **Description**: Creates a new project. Enforces `max_projects` plan limits.
+  - **Request Body**: `name, description`
 
-### 15. Delete Project
-- **Endpoint**: `DELETE /api/projects/:projectId`
-- **Auth**: Admin or Creator
+- **GET** `/api/projects`
+  - **Auth**: Required (Any Role)
+  - **Description**: Lists all projects for the user's organization.
 
----
+- **PUT** `/api/projects/:projectId`
+  - **Auth**: Required (Admin or Creator)
+  - **Description**: Updates project name, description, or status (Active/Archived).
 
-## Task Management
+- **DELETE** `/api/projects/:projectId`
+  - **Auth**: Required (Admin or Creator)
+  - **Description**: Deletes a project and all associated tasks.
 
-### 16. Create Task
-- **Endpoint**: `POST /api/projects/:projectId/tasks`
-- **Auth**: Tenant Member
+## 5. Task Management Module
 
-### 17. List Project Tasks
-- **Endpoint**: `GET /api/projects/:projectId/tasks`
-- **Auth**: Tenant Member
+Endpoints for granular task tracking within projects.
 
-### 18. Update Task Status
-- **Endpoint**: `PATCH /api/tasks/:taskId/status`
-- **Auth**: Tenant Member
+- **POST** `/api/projects/:projectId/tasks`
+  - **Auth**: Required (Any Role)
+  - **Description**: Creates a task. Inherits `tenant_id` from the project for isolation.
+  - **Request Body**: `title, description, assignedTo, priority, dueDate`
 
-### 19. Update Task
-- **Endpoint**: `PUT /api/tasks/:taskId`
-- **Auth**: Tenant Member
+- **GET** `/api/projects/:projectId/tasks`
+  - **Auth**: Required (Any Role)
+  - **Description**: Lists all tasks within a specific project.
+
+- **PATCH** `/api/tasks/:taskId/status`
+  - **Auth**: Required (Any Role)
+  - **Description**: Specialized endpoint for quick status updates (Todo/In Progress/Done).
+
+- **PUT** `/api/tasks/:taskId`
+  - **Auth**: Required (Any Role)
+  - **Description**: Full update of task details, assignments, or deadlines.
+
+## 6. System Health
+
+- **GET** `/api/health`
+  - **Auth**: None
+  - **Description**: Returns status "ok" and database connection status for monitoring.
