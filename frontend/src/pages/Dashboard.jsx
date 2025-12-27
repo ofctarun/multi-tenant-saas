@@ -71,9 +71,9 @@ function Dashboard() {
   return (
     <div className="dashboard-container">
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <LayoutDashboard size={28} className="text-muted" color="var(--text-muted)" />
-          <h2 style={{ fontSize: "1.2rem", color: "var(--text-muted)", margin: 0 }}>Dashboard</h2>
+          <h2 style={{ fontSize: "1.3rem", color: "var(--text-muted)", margin: 0 }}>Dashboard</h2>
         </div>
         <button onClick={handleLogout} className="btn-secondary btn-sm">
           <LogOut size={16} style={{ marginRight: "8px" }} />
