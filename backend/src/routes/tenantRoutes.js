@@ -1,11 +1,7 @@
 import express from "express";
 import { authenticate } from "../middleware/authMiddleware.js";
 import roleMiddleware from "../middleware/roleMiddleware.js";
-import {
-  getTenantById,
-  updateTenant,
-  listTenants,
-} from "../controllers/tenantController.js";
+import {getTenantById,updateTenant,listTenants} from "../controllers/tenantController.js";
 
 const router = express.Router();
 
