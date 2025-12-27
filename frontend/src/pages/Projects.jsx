@@ -67,14 +67,14 @@ function Projects() {
       await api.delete(`/projects/${projectId}`);
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
     } catch {
-      alert("Failed to delete project");
+      alert("Failed to delete the project");
     }
   };
 
   return (
     <div className="dashboard-container">
       <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <FolderPlus size={28} className="text-muted" color="var(--text-muted)" />
           <h2 style={{ fontSize: "1.2rem", color: "var(--text-muted)", margin: 0 }}>Projects</h2>
         </div>
@@ -86,7 +86,7 @@ function Projects() {
       {/* ================= ADD PROJECT ================= */}
       {isTenantAdmin() && (
         <div className="inline-form">
-          <h4 style={{ marginBottom: "15px", color: "var(--text-main)" }}>Create New Project</h4>
+          <h4 style={{ marginBottom: "16px", color: "var(--text-main)" }}>Create New Project</h4>
           <form onSubmit={handleAddProject} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
             <div className="form-group">
               <label>Project Name</label>
@@ -119,7 +119,7 @@ function Projects() {
 
       {/* ================= PROJECT LIST ================= */}
       {projects.length === 0 ? (
-        <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)", background: "var(--card-bg)", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+        <div style={{ padding: "42px", textAlign: "center", color: "var(--text-muted)", background: "var(--card-bg)", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
           No projects found.
         </div>
       ) : (
@@ -150,7 +150,7 @@ function Projects() {
 
                 <td style={{ textAlign: "right" }}>
                   <button
-                    className="btn-secondary btn-sm"
+                    className="btn-secondary  btn-sm"
                     onClick={() => navigate(`/projects/${project.id}`)}
                     style={{ marginRight: "8px" }}
                   >
