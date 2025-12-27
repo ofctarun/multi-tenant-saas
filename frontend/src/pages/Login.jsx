@@ -92,7 +92,7 @@ function Login() {
         </div>
 
         <button disabled={loading} className="btn-full">
-          {loading ? "Logging in..." : "Sign In"}
+          {loading ? "Logging in......" : "Sign In"}
         </button>
       </form>
 
