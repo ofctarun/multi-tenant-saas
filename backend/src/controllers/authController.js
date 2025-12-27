@@ -24,7 +24,7 @@ export const registerTenant = async (req, res) => {
   ) {
     return res.status(400).json({
       success: false,
-      message: "All fields are required",
+      message: "Make sure that All fields are required",
     });
   }
 
@@ -60,7 +60,7 @@ export const registerTenant = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Tenant registered successfully",
+      message: "Tenant Registered successfully",
       data: {
         tenantId,
         subdomain,
@@ -70,7 +70,7 @@ export const registerTenant = async (req, res) => {
   } catch (error) {
     await client.query("ROLLBACK");
 
-    console.error("REGISTER TENANT ERROR:", error.message);
+    console.error("Error with Tenant registration:", error.message);
 
     return res.status(400).json({
       success: false,
@@ -118,7 +118,7 @@ export const login = async (req, res) => {
     if (userResult.rowCount === 0) {
       return res.status(401).json({
         success: false,
-        message: "Invalid credentials",
+        message: "Credentials are invalid",
       });
     }
 
