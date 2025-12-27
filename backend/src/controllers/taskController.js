@@ -40,7 +40,7 @@ export const createTask = async (req, res) => {
       if (userCheck.rowCount === 0) {
         return res.status(400).json({
           success: false,
-          message: "Assigned user does not belong to tenant",
+          message: "assigned user does not belong to tenant",
         });
       }
     }
@@ -70,7 +70,7 @@ export const createTask = async (req, res) => {
     console.error("Create Task Error:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to create task",
+      message: "Failed to create the task",
     });
   }
 };
